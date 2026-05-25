@@ -1,7 +1,7 @@
 import http from 'http';
-import { WebSocketServer } from 'ws';
+import { WebSocketServer, WebSocket } from 'ws';
 import dotenv from 'dotenv';
-import { roomManager } from './roomManager.js'; // Note the .js extension for ESM resolution
+import { roomManager } from './roomManager.js';
 
 dotenv.config();
 
@@ -18,48 +18,84 @@ server.on('upgrade', (request, socket, head) => {
   });
 });
 
-wss.on('connection', (ws) => {
-  console.log('[Pipeline]: Connection active.');
-  
-  // For this local phase, we generate a quick random ID for each connection socket
+// Extend the WebSocket type inline to track live heartbeat states
+interface ExtWebSocket extends WebSocket {
+  isAlive: boolean;
+}
+
+wss.on('connection', (ws: ExtWebSocket) => {
+  ws.isAlive = true;
   const participantId = `user_${Math.random().toString(36).substring(2, 9)}`;
   let currentRoomId: string | null = null;
+
+  // Handle client responding to our heartbeat ping
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
 
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message.toString());
-      console.log(`[Incoming Action]:`, data);
 
-      // ACTION 1: Client wants to subscribe to a room
+      // STRICT GATEWAY VALIDATION BOUNDARY
+      if (!data || typeof data !== 'object' || !data.action) {
+        ws.send(JSON.stringify({ event: 'error', message: 'Invalid payload signature. "action" field required.' }));
+        return;
+      }
+
       if (data.action === 'join') {
-        const { roomId, username } = data;
+        const roomId = data.roomId?.trim();
+        const username = data.username?.trim() || 'Anonymous';
+
+        if (!roomId) {
+          ws.send(JSON.stringify({ event: 'error', message: 'Missing "roomId" for join action.' }));
+          return;
+        }
+
         currentRoomId = roomId;
         roomManager.joinRoom(roomId, participantId, ws, username);
-        
-        ws.send(JSON.stringify({ event: 'joined', assignedId: participantId, roomId }));
       } 
       
-      // ACTION 2: Client is broadcasting live operational edits or updates
-      else if (data.action === 'sync' && currentRoomId) {
-        // Broadcast the data payload to everyone else in the room
-        const broadcastPayload = JSON.stringify({
+      else if (data.action === 'sync') {
+        if (!currentRoomId) {
+          ws.send(JSON.stringify({ event: 'error', message: 'You must join a room before broadcasting sync payloads.' }));
+          return;
+        }
+
+        roomManager.broadcastToRoom(currentRoomId, participantId, JSON.stringify({
           event: 'update',
           sender: participantId,
-          payload: data.payload
-        });
-        roomManager.broadcastToRoom(currentRoomId, participantId, broadcastPayload);
+          payload: data.payload || {}
+        }));
       }
     } catch (error) {
-      console.error('[Error Parsing Frame]: Expected JSON structure.', error);
+      ws.send(JSON.stringify({ event: 'error', message: 'Payload parsing failed. Expected valid JSON format.' }));
     }
   });
 
-  // Handle sudden dropouts or tab closes
   ws.on('close', () => {
     if (currentRoomId) {
       roomManager.leaveRoom(currentRoomId, participantId);
     }
   });
+});
+
+// HEARTBEAT MONITORING LOOP (Runs every 30 seconds)
+const interval = setInterval(() => {
+  wss.clients.forEach((client) => {
+    const extClient = client as ExtWebSocket;
+    if (extClient.isAlive === false) {
+      console.log('[Heartbeat]: Dead connection detected. Terminating socket connection.');
+      return extClient.terminate();
+    }
+    
+    extClient.isAlive = false;
+    extClient.ping(); // Send a low-level ping frame across the socket wire
+  });
+}, 30000);
+
+wss.on('close', () => {
+  clearInterval(interval);
 });
 
 const PORT = process.env.PORT || 8080;

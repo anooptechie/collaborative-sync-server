@@ -1,71 +1,80 @@
 import { WebSocket } from 'ws';
 
-// Define what a Participant looks like in our memory space
 interface Participant {
   id: string;
   ws: WebSocket;
-  username?: string;
+  username: string;
 }
 
-// Define the structure of a Collaborative Room
 interface Room {
   id: string;
-  participants: Map<string, Participant>; // Key: participantId, Value: Participant details
+  participants: Map<string, Participant>;
 }
 
 class RoomManager {
-  // Global memory store: Key is roomId, Value is the Room object
   private rooms: Map<string, Room> = new Map();
 
-  /**
-   * Adds a user connection to a specific room. 
-   * If the room doesn't exist yet, it creates it on the fly.
-   */
-  public joinRoom(roomId: string, participantId: string, ws: WebSocket, username?: string): void {
-    // 1. Get or create the room
+  public joinRoom(roomId: string, participantId: string, ws: WebSocket, username: string): void {
     if (!this.rooms.has(roomId)) {
-      this.rooms.set(roomId, {
-        id: roomId,
-        participants: new Map()
-      });
+      this.rooms.set(roomId, { id: roomId, participants: new Map() });
       console.log(`[RoomManager]: New room created -> ${roomId}`);
     }
 
     const room = this.rooms.get(roomId)!;
-
-    // 2. Add the participant to the room
     room.participants.set(participantId, { id: participantId, ws, username });
-    console.log(`[RoomManager]: Participant ${participantId} joined room ${roomId} (Total: ${room.participants.size})`);
+
+    // 1. Get a list of all current users in the room to send to the newcomer
+    const activeUsers = Array.from(room.participants.values()).map(p => ({
+      id: p.id,
+      username: p.username
+    }));
+
+    // 2. Tell the newcomer who is already here
+    ws.send(JSON.stringify({
+      event: 'room-state',
+      roomId,
+      assignedId: participantId,
+      users: activeUsers
+    }));
+
+    // 3. Broadcast to everyone else that a new user stepped in
+    this.broadcastToRoom(roomId, participantId, JSON.stringify({
+      event: 'user-joined',
+      id: participantId,
+      username
+    }));
+
+    console.log(`[RoomManager]: ${username} (${participantId}) joined ${roomId}`);
   }
 
-  /**
-   * Removes a user connection from a room, and cleanly tears down 
-   * the room entirely if it becomes empty to prevent memory leaks.
-   */
   public leaveRoom(roomId: string, participantId: string): void {
     const room = this.rooms.get(roomId);
     if (!room) return;
 
-    room.participants.delete(participantId);
-    console.log(`[RoomManager]: Participant ${participantId} left room ${roomId}`);
+    const participant = room.participants.get(participantId);
+    const username = participant ? participant.username : 'Unknown User';
 
-    // Clean up empty rooms to save memory
-    if (room.participants.size === 0) {
+    room.participants.delete(participantId);
+    console.log(`[RoomManager]: ${username} left room ${roomId}`);
+
+    // Broadcast to remaining users that this individual disconnected
+    if (room.participants.size > 0) {
+      this.broadcastToRoom(roomId, participantId, JSON.stringify({
+        event: 'user-left',
+        id: participantId,
+        username
+      }));
+    } else {
       this.rooms.delete(roomId);
-      console.log(`[RoomManager]: Room ${roomId} is empty. Disposing room memory allocation.`);
+      console.log(`[RoomManager]: Room ${roomId} disposed.`);
     }
   }
 
-  /**
-   * Broadcasts a message string to every single connection inside a room 
-   * *except* the client who originally sent it (the sender).
-   */
   public broadcastToRoom(roomId: string, senderId: string, messageStr: string): void {
     const room = this.rooms.get(roomId);
     if (!room) return;
 
     room.participants.forEach((participant, participantId) => {
-      // Don't send the message back to the person who broadcasted it!
       if (participantId !== senderId && participant.ws.readyState === WebSocket.OPEN) {
         participant.ws.send(messageStr);
       }
@@ -73,5 +82,4 @@ class RoomManager {
   }
 }
 
-// Export a single global instance for our server to use
 export const roomManager = new RoomManager();
