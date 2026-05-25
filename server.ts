@@ -1,50 +1,64 @@
 import http from 'http';
 import { WebSocketServer } from 'ws';
 import dotenv from 'dotenv';
+import { roomManager } from './roomManager.js'; // Note the .js extension for ESM resolution
 
 dotenv.config();
 
-// 1. Foundation HTTP Server
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Nexus Sync Server HTTP Gateway Active.\n');
 });
 
-// 2. Initialize Raw WebSocket Server instance
-// We use 'noServer: true' because we want to manually intercept and upgrade the HTTP connection
 const wss = new WebSocketServer({ noServer: true });
 
-// 3. Intercept incoming HTTP requests and check for the 'Upgrade' header
 server.on('upgrade', (request, socket, head) => {
-  console.log('[Gateway]: Incoming connection upgrade request detected...');
-
-  // This is where we will inject authentication logic later!
   wss.handleUpgrade(request, socket, head, (ws) => {
-    // Handshake successful! Emit a connection event to the WebSocket server
     wss.emit('connection', ws, request);
   });
 });
 
-// 4. Handle Active Live Stateful WebSocket Connections
 wss.on('connection', (ws) => {
-  console.log('[Pipeline]: Connection successfully upgraded to Raw WebSocket. Pipe is active.');
+  console.log('[Pipeline]: Connection active.');
+  
+  // For this local phase, we generate a quick random ID for each connection socket
+  const participantId = `user_${Math.random().toString(36).substring(2, 9)}`;
+  let currentRoomId: string | null = null;
 
-  // Listen for raw text strings sent over the wire from clients
   ws.on('message', (message) => {
     try {
-      const rawData = message.toString();
-      console.log(`[Data Received]: ${rawData}`);
+      const data = JSON.parse(message.toString());
+      console.log(`[Incoming Action]:`, data);
 
-      // Echo chamber test: Send the exact message back to confirm two-way communication
-      ws.send(`Echo from server: ${rawData}`);
+      // ACTION 1: Client wants to subscribe to a room
+      if (data.action === 'join') {
+        const { roomId, username } = data;
+        currentRoomId = roomId;
+        roomManager.joinRoom(roomId, participantId, ws, username);
+        
+        ws.send(JSON.stringify({ event: 'joined', assignedId: participantId, roomId }));
+      } 
+      
+      // ACTION 2: Client is broadcasting live operational edits or updates
+      else if (data.action === 'sync' && currentRoomId) {
+        // Broadcast the data payload to everyone else in the room
+        const broadcastPayload = JSON.stringify({
+          event: 'update',
+          sender: participantId,
+          payload: data.payload
+        });
+        roomManager.broadcastToRoom(currentRoomId, participantId, broadcastPayload);
+      }
     } catch (error) {
-      console.error('[Error]: Failed to process incoming stream frame:', error);
+      console.error('[Error Parsing Frame]: Expected JSON structure.', error);
     }
   });
 
-  // Handle client abrupt disconnections
+  // Handle sudden dropouts or tab closes
   ws.on('close', () => {
-    console.log('[Pipeline]: Client connection closed or dropped.');
+    if (currentRoomId) {
+      roomManager.leaveRoom(currentRoomId, participantId);
+    }
   });
 });
 
