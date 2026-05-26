@@ -2,6 +2,7 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import dotenv from 'dotenv';
 import { roomManager } from './roomManager.js';
+import { initRedis } from './redisClient.js'
 
 dotenv.config();
 
@@ -62,11 +63,11 @@ wss.on('connection', (ws: ExtWebSocket) => {
           return;
         }
 
-        roomManager.broadcastToRoom(currentRoomId, participantId, JSON.stringify({
+        roomManager.publishToRedis(currentRoomId, {
           event: 'update',
           sender: participantId,
           payload: data.payload || {}
-        }));
+        });
       }
     } catch (error) {
       ws.send(JSON.stringify({ event: 'error', message: 'Payload parsing failed. Expected valid JSON format.' }));
@@ -99,6 +100,24 @@ wss.on('close', () => {
 });
 
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => {
-  console.log(`[Nexus Server Running]: Listening on port ${PORT}`);
-});
+
+/**
+ * Asynchronous bootstrap wrapper to ensure infrastructural elements 
+ * resolve connection handshakes successfully before routing web traffic.
+ */
+async function bootstrap() {
+  try {
+    // 1. Force Redis connections to lock open first
+    await initRedis();
+
+    // 2. Open up the gateway for incoming web traffic
+    server.listen(PORT, () => {
+      console.log(`[Nexus Server Running]: Listening on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error('[Bootstrap Failure]: Could not spin up core dependencies:', error);
+    process.exit(1);
+  }
+}
+
+bootstrap();
