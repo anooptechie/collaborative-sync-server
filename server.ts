@@ -2,7 +2,8 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import dotenv from 'dotenv';
 import { roomManager } from './roomManager.js';
-import { initRedis } from './redisClient.js'
+import { initRedis } from './redisClient.js';
+import { authService } from './authService.js'; // ⚡ 1. Added Import
 
 dotenv.config();
 
@@ -13,23 +14,46 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ noServer: true });
 
+// ⚡ 2. HARDENED UPGRADE PIPELINE WITH SECURITY GATE
 server.on('upgrade', (request, socket, head) => {
+  console.log('[Gateway]: Intercepting incoming connection handshake...');
+
+  // Run the upgrade request through our security boundary
+  const session = authService.authenticateRequest(request);
+
+  if (!session.isValid) {
+    console.warn(`[Security Barrier]: Connection rejected -> ${session.error}`);
+    
+    // Write a raw HTTP error response back onto the TCP socket stream and drop it
+    socket.write('HTTP/1.1 401 Unauthorized\r\nContent-Type: text/plain\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  // Session is authentic! Attach metadata back onto the request object for the next stage
+  (request as any).sessionData = session;
+
   wss.handleUpgrade(request, socket, head, (ws) => {
     wss.emit('connection', ws, request);
   });
 });
 
-// Extend the WebSocket type inline to track live heartbeat states
 interface ExtWebSocket extends WebSocket {
   isAlive: boolean;
 }
 
-wss.on('connection', (ws: ExtWebSocket) => {
+wss.on('connection', (ws: ExtWebSocket, request: http.IncomingMessage) => {
   ws.isAlive = true;
+  
+  // ⚡ 3. Extract the verified session metadata we appended during the upgrade phase
+  const session = (request as any).sessionData;
+  const username = session?.username || 'Anoop';
+  
   const participantId = `user_${Math.random().toString(36).substring(2, 9)}`;
   let currentRoomId: string | null = null;
 
-  // Handle client responding to our heartbeat ping
+  console.log(`[Pipeline]: Handshake authorized for user: ${username} (${participantId})`);
+
   ws.on('pong', () => {
     ws.isAlive = true;
   });
@@ -38,7 +62,6 @@ wss.on('connection', (ws: ExtWebSocket) => {
     try {
       const data = JSON.parse(message.toString());
 
-      // STRICT GATEWAY VALIDATION BOUNDARY
       if (!data || typeof data !== 'object' || !data.action) {
         ws.send(JSON.stringify({ event: 'error', message: 'Invalid payload signature. "action" field required.' }));
         return;
@@ -46,7 +69,6 @@ wss.on('connection', (ws: ExtWebSocket) => {
 
       if (data.action === 'join') {
         const roomId = data.roomId?.trim();
-        const username = data.username?.trim() || 'Anonymous';
 
         if (!roomId) {
           ws.send(JSON.stringify({ event: 'error', message: 'Missing "roomId" for join action.' }));
@@ -54,6 +76,7 @@ wss.on('connection', (ws: ExtWebSocket) => {
         }
 
         currentRoomId = roomId;
+        // Use our server-verified username here instead of client input fields
         roomManager.joinRoom(roomId, participantId, ws, username);
       } 
       
@@ -91,7 +114,7 @@ const interval = setInterval(() => {
     }
     
     extClient.isAlive = false;
-    extClient.ping(); // Send a low-level ping frame across the socket wire
+    extClient.ping();
   });
 }, 30000);
 
@@ -101,16 +124,9 @@ wss.on('close', () => {
 
 const PORT = process.env.PORT || 8080;
 
-/**
- * Asynchronous bootstrap wrapper to ensure infrastructural elements 
- * resolve connection handshakes successfully before routing web traffic.
- */
 async function bootstrap() {
   try {
-    // 1. Force Redis connections to lock open first
     await initRedis();
-
-    // 2. Open up the gateway for incoming web traffic
     server.listen(PORT, () => {
       console.log(`[Nexus Server Running]: Listening on port ${PORT}`);
     });
