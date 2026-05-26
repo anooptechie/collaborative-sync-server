@@ -1,137 +1,138 @@
 import { WebSocket } from 'ws';
-import { pubClient, subClient } from './redisClient.js';
+import { getRedisClients } from './redisClient.js';
 
-interface Participant {
+interface RoomParticipant {
   id: string;
   ws: WebSocket;
   username: string;
 }
 
-interface Room {
-  id: string;
-  participants: Map<string, Participant>;
-}
-
 class RoomManager {
-  // We still track local connections on this specific server instance
-  private localRooms: Map<string, Room> = new Map();
-  // Keep track of which Redis channels this server instance has already subscribed to
-  private activeSubscriptions: Set<string> = new Set();
+  // Local tracking pool: Map<roomId, Map<participantId, RoomParticipant>>
+  private rooms: Map<string, Map<string, RoomParticipant>> = new Map();
 
   /**
-   * Adds a user connection to a room and ensures the server instance
-   * is subscribed to the global Redis channel for that room.
+   * Orchestrates joining a room, managing subscriptions, and streaming
+   * the historical room state to late-joiners.
    */
   public async joinRoom(roomId: string, participantId: string, ws: WebSocket, username: string): Promise<void> {
-    // 1. Initialize local room tracking if it doesn't exist on this instance
-    if (!this.localRooms.has(roomId)) {
-      this.localRooms.set(roomId, { id: roomId, participants: new Map() });
-    }
+    const { pubClient, subClient } = getRedisClients();
 
-    const room = this.localRooms.get(roomId)!;
-    room.participants.set(participantId, { id: participantId, ws, username });
+    // 1. Initialize the room pool inside local node memory if it doesn't exist
+    if (!this.rooms.has(roomId)) {
+      this.rooms.set(roomId, new Map());
 
-    // 2. Dynamically bind this server instance to the Redis channel if it hasn't yet
-    const redisChannel = `room:${roomId}`;
-    if (!this.activeSubscriptions.has(redisChannel)) {
-      this.activeSubscriptions.add(redisChannel);
-      
-      await subClient.subscribe(redisChannel, (messageStr) => {
-        // This callback triggers whenever ANY node instance publishes to this channel!
-        this.handleRedisInboundBroadcast(roomId, messageStr);
+      // Subscribe this cluster node to the global Redis channel for this room
+      await subClient.subscribe(`room:${roomId}`, (message: string) => {
+        this.broadcastToLocalRoom(roomId, message);
       });
-      console.log(`[Distributed Architecture]: Subscribed to global Redis channel -> ${redisChannel}`);
+      console.log(`[Distributed Architecture]: Subscribed to global Redis channel -> room:${roomId}`);
     }
 
-    // 3. Inform the local newcomer who is currently sitting on *this specific instance*
-    // (Note: To get global room state across all servers, we will add persistence in a later phase!)
-    const activeLocalUsers = Array.from(room.participants.values()).map(p => ({
-      id: p.id,
-      username: p.username
-    }));
+    // 2. Add the participant to the local room loop
+    const roomPool = this.rooms.get(roomId)!;
+    roomPool.set(participantId, { id: participantId, ws, username });
+    console.log(`[RoomManager]: ${username} (${participantId}) joined room: ${roomId}`);
 
-    ws.send(JSON.stringify({
-      event: 'room-state',
-      roomId,
-      assignedId: participantId,
-      users: activeLocalUsers
-    }));
-
-    // 4. Publish the 'user-joined' event globally so ALL instances know someone stepped in
-    await this.publishToRedis(roomId, {
-      event: 'user-joined',
-      id: participantId,
-      username
-    });
-
-    console.log(`[RoomManager]: ${username} connected to local memory for room ${roomId}`);
-  }
-
-  /**
-   * Removes a user connection from a room and tears down global subscriptions
-   * if this server instance no longer has anyone locally listening to that room.
-   */
-  public async leaveRoom(roomId: string, participantId: string): Promise<void> {
-    const room = this.localRooms.get(roomId);
-    if (!room) return;
-
-    const participant = room.participants.get(participantId);
-    const username = participant ? participant.username : 'Unknown User';
-
-    room.participants.delete(participantId);
-    console.log(`[RoomManager]: ${username} disconnected from local memory.`);
-
-    // Publish the exit event globally across the nervous system
-    await this.publishToRedis(roomId, {
-      event: 'user-left',
-      id: participantId,
-      username
-    });
-
-    // Clean up infrastructure if this instance has zero local clients left in that room
-    if (room.participants.size === 0) {
-      this.localRooms.delete(roomId);
-      const redisChannel = `room:${roomId}`;
+    // 3. LATE-JOINER CATCH-UP: Fetch historical ground truth from Redis Cache
+    try {
+      const cachedState = await pubClient.hGet(`room:state:${roomId}`, 'document');
       
-      if (this.activeSubscriptions.has(redisChannel)) {
-        await subClient.unsubscribe(redisChannel);
-        this.activeSubscriptions.delete(redisChannel);
-        console.log(`[Distributed Architecture]: Unsubscribed from empty global channel -> ${redisChannel}`);
+      if (cachedState) {
+        console.log(`[Persistence Layer]: Cache hit for room: ${roomId}. Streaming snapshot to ${username}.`);
+        // Stream the cached state directly to *only* this newly connected socket
+        ws.send(JSON.stringify({
+          event: 'snapshot',
+          payload: JSON.parse(cachedState)
+        }));
+      } else {
+        console.log(`[Persistence Layer]: Cache miss for room: ${roomId}. Starting clean canvas.`);
       }
+    } catch (err) {
+      console.error(`[Persistence Error]: Failed to recover state for room ${roomId}:`, err);
     }
+
+    // 4. Notify everyone else in the room that a new presence arrived
+    this.publishToRedis(roomId, {
+      event: 'user-joined',
+      sender: 'SYSTEM',
+      payload: { participantId, username, totalConnected: roomPool.size }
+    });
   }
 
-  /**
-   * Publishes a data payload object into the global Redis cluster.
+/**
+   * Publishes messages to the Redis Pub/Sub cluster AND updates the persistent cache hash.
    */
-  public async publishToRedis(roomId: string, payload: any): Promise<void> {
-    const redisChannel = `room:${roomId}`;
-    // Redis only transmits strings, so we serialize the object frame on the way out
-    const serializedData = JSON.stringify(payload);
-    await pubClient.publish(redisChannel, serializedData);
-  }
-
-  /**
-   * Intercepts incoming messages fanned out by the Redis cluster and
-   * streams them to every local socket connection active on this instance.
-   */
-  private handleRedisInboundBroadcast(roomId: string, messageStr: string): void {
-    const room = this.localRooms.get(roomId);
-    if (!room) return;
+  public async publishToRedis(roomId: string, messageObject: { event: string; sender: string; payload: any }): Promise<void> {
+    const { pubClient } = getRedisClients();
+    const messageString = JSON.stringify(messageObject);
 
     try {
-      const parsedData = JSON.parse(messageStr);
-      const senderId = parsedData.id || parsedData.sender;
+      // 1. If this is a live sync message, ensure it passes strict data validation criteria
+      if (messageObject.event === 'update') {
+        const incomingPayload = messageObject.payload;
 
-      // Fan out to every socket connection managed by this local instance
-      room.participants.forEach((participant, participantId) => {
-        // Intelligently skip sending the message back to the original browser client
-        if (participantId !== senderId && participant.ws.readyState === WebSocket.OPEN) {
-          participant.ws.send(messageStr);
+        // HARDENED SCHEMA GUARD: Reject null, arrays, or primitive types from hijacking storage
+        if (incomingPayload && typeof incomingPayload === 'object' && !Array.isArray(incomingPayload)) {
+          await pubClient.hSet(`room:state:${roomId}`, 'document', JSON.stringify(incomingPayload));
+        } else {
+          console.warn(`[Data Boundary Warning]: Dropped invalid state cache write attempt for room ${roomId}. Payload type: ${typeof incomingPayload}`);
         }
-      });
+      }
+
+      // 2. Broadcast the message across the wire via Pub/Sub (keeps live communication fluid)
+      await pubClient.publish(`room:${roomId}`, messageString);
     } catch (err) {
-      console.error('[Distributed Router Error]: Failed to route frame stream.', err);
+      console.error(`[Cluster Error]: Failed infrastructure broadcast/write for room ${roomId}:`, err);
+    }
+  }
+
+  /**
+   * Routes incoming cluster messages down to local socket connections.
+   */
+  private broadcastToLocalRoom(roomId: string, messageString: string): void {
+    const roomPool = this.rooms.get(roomId);
+    if (!roomPool) return;
+
+    const message = JSON.parse(messageString);
+
+    roomPool.forEach((participant) => {
+      // Clean Optimization: Don't echo editing/sync data back to the person who typed it
+      if (message.event === 'update' && participant.id === message.sender) {
+        return;
+      }
+
+      if (participant.ws.readyState === WebSocket.OPEN) {
+        participant.ws.send(messageString);
+      }
+    });
+  }
+
+  /**
+   * Cleans up room infrastructure allocations when a client disconnects.
+   */
+  public async leaveRoom(roomId: string, participantId: string): Promise<void> {
+    const roomPool = this.rooms.get(roomId);
+    if (!roomPool) return;
+
+    const participant = roomPool.get(participantId);
+    roomPool.delete(participantId);
+
+    console.log(`[RoomManager]: Participant ${participantId} left room: ${roomId}`);
+
+    // If the room is completely vacant on this server instance, clean up channel subscription allocations
+    if (roomPool.size === 0) {
+      const { subClient } = getRedisClients();
+      this.rooms.delete(roomId);
+      await subClient.unsubscribe(`room:${roomId}`);
+      console.log(`[Distributed Architecture]: Vacant room. Unsubscribed from channel -> room:${roomId}`);
+    } else {
+      // Notify remaining players of the exit footprint
+      this.publishToRedis(roomId, {
+        event: 'user-left',
+        sender: 'SYSTEM',
+        payload: { participantId, username: participant?.username || 'Anonymous', totalConnected: roomPool.size }
+      });
     }
   }
 }

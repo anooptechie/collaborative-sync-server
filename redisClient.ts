@@ -41,3 +41,10 @@ export async function initRedis(): Promise<void> {
 
   isInitialized = true;
 }
+
+export function getRedisClients() {
+  if (!pubClient || !subClient) {
+    throw new Error('[Redis Infrastructure Failure]: Attempted to retrieve clients before bootstrap initialization.');
+  }
+  return { pubClient, subClient };
+}

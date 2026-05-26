@@ -10,32 +10,33 @@ A real-time, high-performance state synchronization server built to handle low-l
 * **Language:** TypeScript
 * **Execution Engine:** `tsx` (TypeScript Execute) for instant native ESM compilation
 * **Protocol:** Raw WebSockets via the `ws` engine
-* **Message Broker:** Redis (Pub/Sub distributed scaling layer)
+* **Message Broker:** Redis (Pub/Sub distributed scaling & state storage layer)
 
 ---
 
-## 🏗️ Architecture & Features
+## 🏗️ Architecture & Core Components
 
-### 🛡️ 1. Hardened Perimeter & Gateway Authentication
-* **HTTP Handshake Interception:** Intercepts incoming connection requests at the native HTTP level before upgrading the TCP stream to the WebSocket protocol.
-* **Dual-Channel Token Validation:** Processes credentials securely via URL query string parameters or falls back to the `Sec-WebSocket-Protocol` header to bypass aggressive cloud proxy/reverse-proxy stripping (e.g., GitHub Codespaces).
-* **Early Circuit Rejection:** Instantly executes unauthenticated or malicious connections with a `401 Unauthorized` status line, safeguarding downstream system memory and thread loops from unauthorized resource allocation.
+### 🛡️ 1. Secure Connection Authentication & Upgrade Gateway
+* **HTTP Handshake Interception:** Intercepts incoming requests at the native HTTP level before upgrading the TCP stream to the WebSocket protocol.
+* **Proxy-Resilient Token Validation:** Processes credentials via URL query parameters or falls back to the `Sec-WebSocket-Protocol` header to seamlessly bypass aggressive cloud proxies (like GitHub Codespaces).
+* **Early Circuit Rejection:** Instantly terminates unauthenticated or malicious connections with a `401 Unauthorized` response, safeguarding downstream system memory and loops from resource abuse.
 
-### 📡 2. Core Networking Gateway
-* **Native ES Modules:** Configured with `"type": "module"` and `NodeNext` resolution for ultra-fast JS module loading boundaries.
-* **HTTP-to-WS Upgrade Pipeline:** Elevates authenticated incoming web requests into permanent, persistent TCP pipes.
+### 💾 2. Stateful Cache & Late-Joiner Reconciler
+* **In-Memory Caching (Ground Truth):** Implements high-performance Redis Hashes (`HSET`/`HGET`) to cache cumulative document and canvas states at the cluster perimeter.
+* **Late-Joiner Synchronization:** Intercepts room connection events and automatically pulls down the active cached state snapshot, streaming it directly to the newly connected user before joining them to the live feed.
+* **Defensive Schema Guards:** Evaluates incoming `sync` payloads in real time, dropping malformed, null, or primitive type structures to enforce storage invariants and prevent client-side runtime crashes.
 
-### 🌐 3. Horizontally Scalable Pub/Sub Layer
+### 📡 3. Horizontally Scalable Pub/Sub Layer
 * **Decoupled Client Pools:** Implements a dual-client Redis configuration (`pubClient` and `subClient`) to execute publishing commands while concurrently maintaining persistent subscription channels.
-* **Cross-Instance Fan-Out:** Shifts message routing from local server memory to a distributed Redis backend, enabling infinite horizontal scaling across multi-server clusters.
+* **Cross-Instance Fan-Out:** Shifts message routing from local server memory to a distributed Redis backend, enabling horizontal scaling across multi-server clusters.
 
 ### 👥 4. Multi-Tenant Room Isolation
 * **In-Memory Space Managers:** Uses a decoupled `RoomManager` structure driven by efficient map lookups to isolate users into dedicated collaboration scopes.
-* **Selective Broadcasting:** Streams cursor positional changes and text inputs to all active room members while omitting the original sender to eliminate layout thrashing.
+* **Selective Broadcasting:** Streams cursor changes and text inputs to all active room members while omitting the original sender to eliminate layout thrashing.
 
 ### 🫀 5. Active Presence & Heartbeat Keep-Alive
-* **State Footprints:** Automatically generates state footprints when a user steps in (`user-joined`) or disconnects (`user-left`).
-* **Ghost Socket Termination:** Runs an automated multi-client `Ping/Pong` verification sequence every 30 seconds to immediately terminate ghost sockets or dropped client lines.
+* **State Footprints:** Automatically tracks and broadcasts when a user steps into a room (`user-joined`) or disconnects (`user-left`).
+* **Ghost Socket Termination:** Runs an automated multi-client `Ping/Pong` verification sequence every 30 seconds to immediately clean up dead lines or dropped client connections.
 
 ---
 
