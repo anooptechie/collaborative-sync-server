@@ -10,6 +10,7 @@ A real-time, high-performance state synchronization server built to handle low-l
 * **Language:** TypeScript
 * **Execution Engine:** `tsx` (TypeScript Execute) for instant native ESM compilation
 * **Protocol:** Raw WebSockets via the `ws` engine
+* **Telemetry & Observability:** Structured JSON Logging via **Pino** (`pino-pretty` local text formatting)
 * **Hot Storage & Message Broker:** Redis (Pub/Sub distributed scaling & transient caching tier)
 * **Cold Storage Database:** PostgreSQL via **Neon Pool (`pg`)** (ACID-compliant durable persistence tier)
 
@@ -45,6 +46,11 @@ A real-time, high-performance state synchronization server built to handle low-l
 ### 🫀 6. Active Presence & Heartbeat Keep-Alive
 * **State Footprints:** Automatically tracks and broadcasts when a user steps into a room (`user-joined`) or disconnects (`user-left`).
 * **Ghost Socket Termination:** Runs an automated multi-client `Ping/Pong` verification sequence every 30 seconds to immediately clean up dead lines or dropped client connections.
+
+### 🪵 7. Enterprise-Grade Structured Telemetry
+* **Machine-Readable JSON Logging:** Replaces all legacy `console.log` infrastructure points with highly optimized, structured JSON streams via **Pino** to enable effortless parsing by distributed log aggregators (e.g., Datadog, Grafana Loki).
+* **Contextual Metadata Enrichment:** Injects critical distributed variables (`component`, `roomId`, `participantId`) explicitly into log schemas to ensure quick cross-instance error correlation and trace parsing.
+* **Environment-Adaptive Transport Layer:** Dynamically serves raw JSON records in production clusters for minimal compute overhead while automatically routing logs through `pino-pretty` to output human-readable terminal lines locally.
 
 ---
 

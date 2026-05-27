@@ -1,5 +1,6 @@
 import { createClient, RedisClientType } from 'redis';
 import dotenv from 'dotenv';
+import { logger } from './logger.js'; // ⚡ Integrated centralized logger
 
 dotenv.config();
 
@@ -19,14 +20,14 @@ export async function initRedis(): Promise<void> {
 
   const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 
-  console.log(`[Redis]: Connecting to instance at ${redisUrl}...`);
+  logger.info({ component: 'RedisCluster', url: redisUrl }, 'Connecting to Redis cluster instance...');
 
   pubClient = createClient({ url: redisUrl });
   subClient = pubClient.duplicate(); // Clones the configuration mapping safely
 
   // Setup basic error logging boundaries
-  pubClient.on('error', (err) => console.error('[Redis Pub Client Error]:', err));
-  subClient.on('error', (err) => console.error('[Redis Sub Client Error]:', err));
+  pubClient.on('error', (error) => logger.error({ component: 'RedisPub', error }, 'Redis Publisher Client Error encountered'));
+  subClient.on('error', (error) => logger.error({ component: 'RedisSub', error }, 'Redis Subscriber Client Error encountered'));
 
   // Connect both channels concurrently
   await Promise.all([
@@ -34,16 +35,17 @@ export async function initRedis(): Promise<void> {
     subClient.connect()
   ]);
 
-  console.log('============= REDIS LAYER ACTIVE =============');
-  console.log('[Redis]: PubClient successfully connected.');
-  console.log('[Redis]: SubClient successfully connected and ready.');
-  console.log('==============================================');
+  logger.info(
+    { component: 'RedisCluster', status: 'ACTIVE', url: redisUrl }, 
+    'Distributed Redis scaling and caching layers successfully established'
+  );
 
   isInitialized = true;
 }
 
 export function getRedisClients() {
   if (!pubClient || !subClient) {
+    logger.fatal({ component: 'RedisCluster' }, 'Infrastructure retrieval mapping failed. Cluster not initialized.');
     throw new Error('[Redis Infrastructure Failure]: Attempted to retrieve clients before bootstrap initialization.');
   }
   return { pubClient, subClient };
