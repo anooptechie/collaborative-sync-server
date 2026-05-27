@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { roomManager } from './roomManager.js';
 import { initRedis } from './redisClient.js';
 import { authService } from './authService.js'; // ⚡ 1. Added Import
+import { initDatabase } from './dbClient.js';
 
 dotenv.config();
 
@@ -49,7 +50,7 @@ wss.on('connection', (ws: ExtWebSocket, request: http.IncomingMessage) => {
   const session = (request as any).sessionData;
   const username = session?.username || 'Anoop';
   
-  const participantId = `user_${Math.random().toString(36).substring(2, 9)}`;
+  const participantId = `user_${username.toLowerCase().trim()}`;
   let currentRoomId: string | null = null;
 
   console.log(`[Pipeline]: Handshake authorized for user: ${username} (${participantId})`);
@@ -127,6 +128,8 @@ const PORT = process.env.PORT || 8080;
 async function bootstrap() {
   try {
     await initRedis();
+    await initDatabase(); // ⚡ Boot and run migrations for Postgres table
+    
     server.listen(PORT, () => {
       console.log(`[Nexus Server Running]: Listening on port ${PORT}`);
     });

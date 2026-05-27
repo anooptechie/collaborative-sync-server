@@ -1,5 +1,6 @@
 import { WebSocket } from 'ws';
 import { getRedisClients } from './redisClient.js';
+import { db } from './dbClient.js'; // ⚡ Hooking up Neon PostgreSQL Client
 
 interface RoomParticipant {
   id: string;
@@ -27,16 +28,37 @@ class RoomManager {
     console.log(`[RoomManager]: ${username} (${participantId}) joined room: ${roomId}`);
 
     try {
-      const cachedState = await pubClient.hGet(`room:state:${roomId}`, 'document');
+      // 1. First line of defense: Read from hot memory cache
+      let cachedState = await pubClient.hGet(`room:state:${roomId}`, 'document');
       
+      // 🔄 2. COLD STORAGE HYDRATION TRIPPED
+      if (!cachedState) {
+        console.log(`[Hydration Layer]: Cache miss for room: ${roomId}. Inspecting PostgreSQL (Neon)...`);
+        
+        const dbResult = await db.query(
+          'SELECT content FROM room_snapshots WHERE room_id = $1',
+          [roomId]
+        );
+
+        if (dbResult.rows.length > 0) {
+          console.log(`[Hydration Layer]: Archival blueprint discovered in Neon. Warming up Redis...`);
+          const documentData = dbResult.rows[0].content;
+          cachedState = JSON.stringify(documentData);
+
+          // Restore hot memory baseline state & fire the sliding 24hr TTL insurance policy
+          await pubClient.hSet(`room:state:${roomId}`, 'document', cachedState);
+          await pubClient.expire(`room:state:${roomId}`, 86400);
+        }
+      }
+
       if (cachedState) {
-        console.log(`[Persistence Layer]: Cache hit for room: ${roomId}. Streaming snapshot to ${username}.`);
+        console.log(`[Persistence Layer]: State ready for room: ${roomId}. Streaming snapshot to ${username}.`);
         ws.send(JSON.stringify({
           event: 'snapshot',
           payload: JSON.parse(cachedState)
         }));
       } else {
-        console.log(`[Persistence Layer]: Cache miss for room: ${roomId}. Starting clean canvas.`);
+        console.log(`[Persistence Layer]: No active or archival state found for room: ${roomId}. Starting clean canvas.`);
       }
     } catch (err) {
       console.error(`[Persistence Error]: Failed to recover state for room ${roomId}:`, err);
@@ -60,11 +82,10 @@ class RoomManager {
         if (incomingPayload && typeof incomingPayload === 'object' && !Array.isArray(incomingPayload)) {
           const cacheKey = `room:state:${roomId}`;
           
-          // 1. Persist the current snapshot state delta
+          // Persist the current snapshot state delta
           await pubClient.hSet(cacheKey, 'document', JSON.stringify(incomingPayload));
           
-          // 2. ⚡ DEFENSE LINE 1: Enforce a sliding 24-hour expiration window (86400 seconds)
-          // Every active edit keeps the lease alive for another day.
+          // DEFENSE LINE 1: Enforce a sliding 24-hour expiration window (86400 seconds)
           await pubClient.expire(cacheKey, 86400);
         } else {
           console.warn(`[Data Boundary Warning]: Dropped invalid state cache write attempt for room ${roomId}.`);
@@ -103,22 +124,37 @@ class RoomManager {
 
     console.log(`[RoomManager]: Participant ${participantId} left room: ${roomId}`);
 
-    // If the room is completely vacant on this server instance, clean up allocations
     if (roomPool.size === 0) {
       const { pubClient, subClient } = getRedisClients();
       this.rooms.delete(roomId);
       
-      // Unsubscribe from live pub/sub traffic
       await subClient.unsubscribe(`room:${roomId}`);
-      console.log(`[Distributed Architecture]: Vacant room. Unsubscribed from channel -> room:${roomId}`);
+      console.log(`[Distributed Architecture]: Vacant room on instance. Unsubscribed from channel -> room:${roomId}`);
       
-      // 3. ⚡ DEFENSE LINE 2: Explicit Eviction on Vacancy
-      // Clean up the static cache database completely when the room becomes dead space.
       try {
+        // 📥 1. Read latest hot snapshot before dropping it
+        const currentCachedState = await pubClient.hGet(`room:state:${roomId}`, 'document');
+
+        if (currentCachedState) {
+          console.log(`[Cold Storage Handoff]: Executing atomic archive flush to Neon PostgreSQL for room: ${roomId}`);
+          
+          // 🗄️ 2. Safe upsert: Insert snapshot or update content if it already existed historically
+          await db.query(`
+            INSERT INTO room_snapshots (room_id, content, updated_at)
+            VALUES ($1, $2, CURRENT_TIMESTAMP)
+            ON CONFLICT (room_id)
+            DO UPDATE SET content = EXCLUDED.content, updated_at = CURRENT_TIMESTAMP;
+          `, [roomId, JSON.parse(currentCachedState)]);
+          
+          console.log(`[Cold Storage Handoff]: Secure write acknowledged by Postgres for room: ${roomId}`);
+        }
+
+        // 🧹 3. DEFENSE LINE 2: Explicit Eviction on Vacancy
         await pubClient.del(`room:state:${roomId}`);
-        console.log(`[Eviction Engine]: Room "${roomId}" is vacant. Static memory cleared from Redis.`);
-      } catch (evictErr) {
-        console.error(`[Eviction Error]: Failed to drop cache key for room ${roomId}:`, evictErr);
+        console.log(`[Eviction Engine]: Room "${roomId}" is vacant. Static memory cleared from Redis RAM.`);
+      } catch (err) {
+        // High alert boundary guard: Log the failure but don't wipe Redis if the database flush failed!
+        console.error(`[Critical Persistence Failure]: Aborting memory clearing. Failed to commit cold snapshot for room ${roomId}:`, err);
       }
     } else {
       this.publishToRedis(roomId, {

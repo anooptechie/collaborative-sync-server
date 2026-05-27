@@ -10,7 +10,8 @@ A real-time, high-performance state synchronization server built to handle low-l
 * **Language:** TypeScript
 * **Execution Engine:** `tsx` (TypeScript Execute) for instant native ESM compilation
 * **Protocol:** Raw WebSockets via the `ws` engine
-* **Message Broker:** Redis (Pub/Sub distributed scaling & state storage layer)
+* **Hot Storage & Message Broker:** Redis (Pub/Sub distributed scaling & transient caching tier)
+* **Cold Storage Database:** PostgreSQL via **Neon Pool (`pg`)** (ACID-compliant durable persistence tier)
 
 ---
 
@@ -19,15 +20,18 @@ A real-time, high-performance state synchronization server built to handle low-l
 ### 🛡️ 1. Secure Connection Authentication & Upgrade Gateway
 * **HTTP Handshake Interception:** Intercepts incoming requests at the native HTTP level before upgrading the TCP stream to the WebSocket protocol.
 * **Proxy-Resilient Token Validation:** Processes credentials via URL query parameters or falls back to the `Sec-WebSocket-Protocol` header to seamlessly bypass aggressive cloud proxies (like GitHub Codespaces).
+* **Deterministic Identity Isolation:** Binds socket lifetimes directly to verified session metadata extracted by the authentication layer, generating stable, immutable participant IDs to guarantee state footprint consistency across hardware reconnects.
 * **Early Circuit Rejection:** Instantly terminates unauthenticated or malicious connections with a `401 Unauthorized` response, safeguarding downstream system memory and loops from resource abuse.
 
 ### 💾 2. Stateful Cache & Late-Joiner Reconciler
-* **In-Memory Caching (Ground Truth):** Implements high-performance Redis Hashes (`HSET`/`HGET`) to cache cumulative document and canvas states at the cluster perimeter.
+* **In-Memory Caching (Hot Tier):** Implements high-performance Redis Hashes (`HSET`/`HGET`) to cache cumulative document and canvas states at the cluster perimeter for sub-millisecond propagation times.
 * **Late-Joiner Synchronization:** Intercepts room connection events and automatically pulls down the active cached state snapshot, streaming it directly to the newly connected user before joining them to the live feed.
 * **Defensive Schema Guards:** Evaluates incoming `sync` payloads in real time, dropping malformed, null, or primitive type structures to enforce storage invariants and prevent client-side runtime crashes.
 
-### 🧹 3. Two-Tier Cache Eviction & Memory Management
-* **Immediate Explicit Purge:** Triggers a fast eviction sequence via `DEL` commands the absolute millisecond a collaboration room pool drops to zero active participants on a clean disconnect, immediately recycling high-cost RAM.
+### 🧹 3. Two-Tier Cache Eviction & Relational Cold Storage Hydration
+* **Durable Postgres Handoff:** Executes an atomic SQL upsert (`ON CONFLICT DO UPDATE`) to a Neon PostgreSQL database the absolute millisecond a collaboration room pool drops to zero active participants, archiving the unstructured runtime snapshot into a structured relational tier.
+* **Crash-Safe Memory Eviction:** Safely recycles high-cost RAM by executing a Redis `DEL` command *only* after a successful, verified write acknowledgment is received from the PostgreSQL persistent drive.
+* **On-Demand Cache Hydration:** Intercepts room connection requests, catching Redis cache misses and querying Neon PostgreSQL to automatically re-hydrate the hot storage cache tier before streaming the snapshot to returning clients.
 * **Sliding 24-Hour TTL Guard:** Attaches an active `EXPIRE` window to cache records on every state modification to provide automated infrastructure insurance against dirty sockets, sudden power loss, or network timeouts that bypass standard socket close frames.
 
 ### 📡 4. Horizontally Scalable Pub/Sub Layer
@@ -44,9 +48,22 @@ A real-time, high-performance state synchronization server built to handle low-l
 
 ---
 
-## 🚦 Getting Started
+## 🗄️ Database Schema Design
 
-### 1. Install Dependencies
+The cold storage tier leverages PostgreSQL's binary JSON capabilities (`JSONB`) to blend relational structural integrity with unstructured snapshot flexibility, avoiding complex object-relational mapping overhead.
+
+```sql
+CREATE TABLE IF NOT EXISTS room_snapshots (
+    room_id VARCHAR(255) PRIMARY KEY,
+    content JSONB NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index optimization for ultra-fast lookup during cache miss hydration
+CREATE UNIQUE INDEX IF NOT EXISTS idx_room_snapshots_room_id ON room_snapshots(room_id);
+
+🚦 Getting Started
+1. Install Dependencies
 
 npm install
 
@@ -55,9 +72,9 @@ Create a .env file in the root directory:
 
 PORT=8080
 REDIS_URL=redis://127.0.0.1:6379
+DATABASE_URL=postgresql://your_user:your_password@your_neon_host.neon.tech/neondb?sslmode=require
+NODE_ENV=development
 
 3. Run the Development Server (with hot reloading)
 
 npm run dev
-
----
