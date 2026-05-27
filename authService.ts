@@ -1,5 +1,6 @@
 import { IncomingMessage } from 'http';
 import { URL } from 'url';
+import { logger } from './logger.js'; // ⚡ Integrated centralized logger
 
 interface AuthSession {
   isValid: boolean;
@@ -22,10 +23,16 @@ class AuthService {
       // 2. FALLBACK: If URL query is stripped by Codespaces, check the Sec-WebSocket-Protocol header
       if (!token && req.headers['sec-websocket-protocol']) {
         token = req.headers['sec-websocket-protocol'].toString().trim();
-        console.log(`[Security Layer]: Extracted fallback token from Protocol Header: ${token}`);
+        logger.info(
+          { component: 'SecurityLayer', username }, 
+          'Extracted fallback authorization token from Sec-WebSocket-Protocol header'
+        );
       }
 
-      console.log(`[Security Debug]: Evaluating Token: "${token}" for User: "${username}"`);
+      logger.debug(
+        { component: 'SecurityBarrier', username, hasToken: !!token }, 
+        'Evaluating handshake session credentials'
+      );
 
       if (!token) {
         return { isValid: false, username: '', error: 'Access Denied. No token found in URL or Protocol Headers.' };
@@ -36,9 +43,11 @@ class AuthService {
       }
 
       return { isValid: true, username };
-    } catch (err) {
+    } catch (error) {
+      logger.error({ component: 'SecurityBarrier', error }, 'Authentication subsystem runtime processing failure');
       return { isValid: false, username: '', error: 'Authentication processing failure.' };
     }
   }
 }
+
 export const authService = new AuthService();

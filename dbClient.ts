@@ -1,5 +1,6 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
+import { logger } from './logger.js'; // ⚡ Integrated centralized logger
 
 dotenv.config();
 
@@ -28,9 +29,15 @@ export async function initDatabase() {
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    console.log('[PostgreSQL]: Connection verified and room_snapshots table is ready.');
+    logger.info(
+      { component: 'PostgreSQL', table: 'room_snapshots' }, 
+      'Database connection verified and relational baseline table schema is operational'
+    );
   } catch (error) {
-    console.error('[PostgreSQL]: Database initialization failed:', error);
+    logger.error(
+      { component: 'PostgreSQL', error }, 
+      'Database initialization sequence failed to verify or execute table checks'
+    );
     throw error;
   }
 }
