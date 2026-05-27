@@ -26,15 +26,19 @@ A real-time, high-performance state synchronization server built to handle low-l
 * **Late-Joiner Synchronization:** Intercepts room connection events and automatically pulls down the active cached state snapshot, streaming it directly to the newly connected user before joining them to the live feed.
 * **Defensive Schema Guards:** Evaluates incoming `sync` payloads in real time, dropping malformed, null, or primitive type structures to enforce storage invariants and prevent client-side runtime crashes.
 
-### 📡 3. Horizontally Scalable Pub/Sub Layer
+### 🧹 3. Two-Tier Cache Eviction & Memory Management
+* **Immediate Explicit Purge:** Triggers a fast eviction sequence via `DEL` commands the absolute millisecond a collaboration room pool drops to zero active participants on a clean disconnect, immediately recycling high-cost RAM.
+* **Sliding 24-Hour TTL Guard:** Attaches an active `EXPIRE` window to cache records on every state modification to provide automated infrastructure insurance against dirty sockets, sudden power loss, or network timeouts that bypass standard socket close frames.
+
+### 📡 4. Horizontally Scalable Pub/Sub Layer
 * **Decoupled Client Pools:** Implements a dual-client Redis configuration (`pubClient` and `subClient`) to execute publishing commands while concurrently maintaining persistent subscription channels.
 * **Cross-Instance Fan-Out:** Shifts message routing from local server memory to a distributed Redis backend, enabling horizontal scaling across multi-server clusters.
 
-### 👥 4. Multi-Tenant Room Isolation
+### 👥 5. Multi-Tenant Room Isolation
 * **In-Memory Space Managers:** Uses a decoupled `RoomManager` structure driven by efficient map lookups to isolate users into dedicated collaboration scopes.
 * **Selective Broadcasting:** Streams cursor changes and text inputs to all active room members while omitting the original sender to eliminate layout thrashing.
 
-### 🫀 5. Active Presence & Heartbeat Keep-Alive
+### 🫀 6. Active Presence & Heartbeat Keep-Alive
 * **State Footprints:** Automatically tracks and broadcasts when a user steps into a room (`user-joined`) or disconnects (`user-left`).
 * **Ghost Socket Termination:** Runs an automated multi-client `Ping/Pong` verification sequence every 30 seconds to immediately clean up dead lines or dropped client connections.
 
