@@ -1,0 +1,13 @@
+:8080 {
+    reverse_proxy {
+        # Define your three internal cluster nodes
+        to 127.0.0.1:8999 127.0.0.1:9000 127.0.0.1:9001
+
+        # Enable round-robin distribution policy
+        lb_policy round_robin
+
+        # Ensure WebSocket connections remain bound to their respective upstream node
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+    }
+}

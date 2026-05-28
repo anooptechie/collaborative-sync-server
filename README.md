@@ -69,18 +69,69 @@ CREATE TABLE IF NOT EXISTS room_snapshots (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_room_snapshots_room_id ON room_snapshots(room_id);
 
 🚦 Getting Started
+
 1. Install Dependencies
 
 npm install
 
 2. Configure Environment Variables
+
 Create a .env file in the root directory:
 
-PORT=8080
+Code snippet
+PORT=8999
 REDIS_URL=redis://127.0.0.1:6379
 DATABASE_URL=postgresql://your_user:your_password@your_neon_host.neon.tech/neondb?sslmode=require
 NODE_ENV=development
 
-3. Run the Development Server (with hot reloading)
+# Telemetry Integrations
+GRAFANA_API_TOKEN=glc_your_secure_access_policy_token
+
+3. Run the Development Server (Single Instance Mode)
 
 npm run dev
+
+
+🌐 Running as a Horizontally Scalable Cluster
+To simulate a distributed production deployment locally or within GitHub Codespaces, you can scale the system horizontally across multiple isolated node processes orchestrated by a reverse proxy.
+
+1. Spin Up the Node.js Instance Cluster
+Open three separate terminal sessions to initialize independent server runtimes sharing the same Redis backplane:
+
+# Terminal 1 (Instance 1)
+PORT=8999 npm run dev
+
+# Terminal 2 (Instance 2)
+PORT=9000 npm run dev
+
+# Terminal 3 (Instance 3)
+PORT=9001 npm run dev
+
+2. Launch the Caddy Gateway Load Balancer
+Create a Caddyfile in your project root to handle stateful round-robin reverse proxy routing and automatic TCP WebSocket upgrades:
+
+Plaintext
+:8080 {
+    reverse_proxy {
+        to 127.0.0.1:8999 127.0.0.1:9000 127.0.0.1:9001
+        lb_policy round_robin
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+    }
+}
+Run the gateway in a fourth terminal session:
+
+
+caddy run --config Caddyfile
+The unified proxy gateway is now accessible at ws://localhost:8080.
+
+🧪 Performance Validation & Stress Testing
+The infrastructure includes a dedicated performance verification suite using k6 to stress test system boundaries, concurrency ramps, and cross-instance Pub/Sub message propagation speeds.
+
+1. Execute the Target Load Test Profile
+Ensure your environment token configuration inside load-test.js targets the unified Caddy gateway entry node (port 8080), then trigger the runner:
+
+k6 run load-test.js
+
+2. Telemetry Verification & Dashboards
+Real-time traffic patterns, connection runtimes, protocol performance metrics, and active room populations are aggregated concurrently across all running nodes and visualized in your Grafana Cloud Dashboard.
