@@ -1,7 +1,8 @@
 import { WebSocket } from 'ws';
 import { getRedisClients } from './redisClient.js';
 import { db } from './dbClient.js'; 
-import { logger } from './logger.js'; // ⚡ Integrated centralized logger
+import { logger } from './logger.js'; 
+import { activeRoomsGauge } from './metrics.js'; // ⚡ Integrated active rooms metric tracker
 
 interface RoomParticipant {
   id: string;
@@ -17,6 +18,9 @@ class RoomManager {
 
     if (!this.rooms.has(roomId)) {
       this.rooms.set(roomId, new Map());
+
+      // 📈 Telemetry: Increment the gauge as a new active room enters the lifecycle
+      activeRoomsGauge.inc();
 
       await subClient.subscribe(`room:${roomId}`, (message: string) => {
         this.broadcastToLocalRoom(roomId, message);
@@ -160,6 +164,9 @@ class RoomManager {
     if (roomPool.size === 0) {
       const { pubClient, subClient } = getRedisClients();
       this.rooms.delete(roomId);
+      
+      // 📈 Telemetry: Decrement the active rooms tracking pool state upon formal eviction
+      activeRoomsGauge.dec();
       
       await subClient.unsubscribe(`room:${roomId}`);
       logger.info(

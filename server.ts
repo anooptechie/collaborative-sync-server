@@ -2,14 +2,31 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import dotenv from 'dotenv';
 import { roomManager } from './roomManager.js';
-import { initRedis } from './redisClient.js' // Note: Ensure this file match paths exactly (e.g. ./redisClient.js or ./initRedis.js)
+import { initRedis } from './redisClient.js';
 import { authService } from './authService.js';
 import { initDatabase } from './dbClient.js';
-import { logger } from './logger.js'; // ⚡ Integrated centralized logger
+import { logger } from './logger.js'; 
+import { register, activeConnectionsGauge, messageCounter } from './metrics.js'; // ⚡ Metrics Registry Imports
 
 dotenv.config();
 
+// 📈 Expose both metrics scraping and standard gateway services safely
 const server = http.createServer((req, res) => {
+  if (req.url === '/metrics') {
+    register.metrics()
+      .then((metricsOutput) => {
+        res.writeHead(200, { 'Content-Type': register.contentType, 'Access-Control-Allow-Origin': '*' });
+        res.end(metricsOutput);
+      })
+      .catch((error) => {
+        logger.error({ component: 'MetricsEngine', error }, 'Failed to expose metrics registry payload');
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Metrics collection failure\n');
+      });
+    return;
+  }
+
+  // Your standard fallback HTTP path
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Nexus Sync Server HTTP Gateway Active.\n');
 });
@@ -50,6 +67,9 @@ interface ExtWebSocket extends WebSocket {
 wss.on('connection', (ws: ExtWebSocket, request: http.IncomingMessage) => {
   ws.isAlive = true;
   
+  // 📈 Track active connection additions across telemetry layers
+  activeConnectionsGauge.inc();
+
   // Extract the verified session metadata appended during the upgrade phase
   const session = (request as any).sessionData;
   const username = session?.username || 'Anoop';
@@ -71,10 +91,14 @@ wss.on('connection', (ws: ExtWebSocket, request: http.IncomingMessage) => {
       const data = JSON.parse(message.toString());
 
       if (!data || typeof data !== 'object' || !data.action) {
+        messageCounter.inc({ action: 'invalid' }); // 📈 Record malformed hits
         logger.warn({ component: 'Pipeline', participantId }, 'Received malformed socket message signature missing action');
         ws.send(JSON.stringify({ event: 'error', message: 'Invalid payload signature. "action" field required.' }));
         return;
       }
+
+      // 📈 Log categorized valid action event instances
+      messageCounter.inc({ action: data.action });
 
       if (data.action === 'join') {
         const roomId = data.roomId?.trim();
@@ -104,12 +128,16 @@ wss.on('connection', (ws: ExtWebSocket, request: http.IncomingMessage) => {
         });
       }
     } catch (error) {
+      messageCounter.inc({ action: 'malformed_json' });
       logger.error({ component: 'Pipeline', participantId, error }, 'Failed to process incoming payload parse sequence');
       ws.send(JSON.stringify({ event: 'error', message: 'Payload parsing failed. Expected valid JSON format.' }));
     }
   });
 
   ws.on('close', () => {
+    // 📈 Safely evict connection footprint counters
+    activeConnectionsGauge.dec();
+
     if (currentRoomId) {
       roomManager.leaveRoom(currentRoomId, participantId);
     }
@@ -134,15 +162,19 @@ wss.on('close', () => {
   clearInterval(interval);
 });
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 8999;
 
 async function bootstrap() {
   try {
     await initRedis();
     await initDatabase(); // Boot and run migrations for Postgres table
     
-    server.listen(PORT, () => {
-      logger.info({ component: 'Bootstrap', port: PORT }, 'Nexus Sync Server is fully operational');
+    // ⚡ FIX: Explicitly bind to '0.0.0.0' to open up local network routing interfaces
+    server.listen(Number(PORT), '0.0.0.0', () => {
+      logger.info(
+        { component: 'Bootstrap', host: '0.0.0.0', port: PORT }, 
+        'Nexus Sync Server is fully operational with Prometheus metrics exposure'
+      );
     });
   } catch (error) {
     logger.fatal({ component: 'Bootstrap', error }, 'Core dependency failure during application initialization sequence');
