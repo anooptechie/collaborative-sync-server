@@ -10,7 +10,7 @@ A real-time, high-performance state synchronization server built to handle low-l
 * **Language:** TypeScript
 * **Execution Engine:** `tsx` (TypeScript Execute) for instant native ESM compilation
 * **Protocol:** Raw WebSockets via the `ws` engine
-* **Telemetry & Observability:** Structured JSON Logging via **Pino** (`pino-pretty` local text formatting)
+* **Telemetry & Observability:** Structured JSON Logging via **Pino**, Metrics via **prom-client**, Dashboarding via **Grafana Cloud**
 * **Hot Storage & Message Broker:** Redis (Pub/Sub distributed scaling & transient caching tier)
 * **Cold Storage Database:** PostgreSQL via **Neon Pool (`pg`)** (ACID-compliant durable persistence tier)
 
@@ -47,10 +47,10 @@ A real-time, high-performance state synchronization server built to handle low-l
 * **State Footprints:** Automatically tracks and broadcasts when a user steps into a room (`user-joined`) or disconnects (`user-left`).
 * **Ghost Socket Termination:** Runs an automated multi-client `Ping/Pong` verification sequence every 30 seconds to immediately clean up dead lines or dropped client connections.
 
-### 🪵 7. Enterprise-Grade Structured Telemetry
-* **Machine-Readable JSON Logging:** Replaces all legacy `console.log` infrastructure points with highly optimized, structured JSON streams via **Pino** to enable effortless parsing by distributed log aggregators (e.g., Datadog, Grafana Loki).
-* **Contextual Metadata Enrichment:** Injects critical distributed variables (`component`, `roomId`, `participantId`) explicitly into log schemas to ensure quick cross-instance error correlation and trace parsing.
-* **Environment-Adaptive Transport Layer:** Dynamically serves raw JSON records in production clusters for minimal compute overhead while automatically routing logs through `pino-pretty` to output human-readable terminal lines locally.
+### 📈 7. Dual-Engine Observability & Telemetry Push Pipeline
+* **Machine-Readable JSON Logging:** Replaces all legacy console logging with highly optimized JSON streams via **Pino** to enable effortless parsing by distributed log aggregators (e.g., Grafana Loki).
+* **Prometheus Primitives Tracking:** Instruments internal server states using memory-efficient gauges and categorized counters (`prom-client`) exposed via an internal `/metrics` scraping endpoint.
+* **Outbound Graphite Ingestion Sync:** Spawns an isolated background thread that aggregates internal Prometheus registries every 10 seconds, packing system statistics into a strict JSON-to-Graphite matrix payload transmitted directly to Grafana Cloud over secure Basic Authentication headers.
 
 ---
 

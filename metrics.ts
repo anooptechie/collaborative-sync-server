@@ -38,35 +38,47 @@ register.registerMetric(activeRoomsGauge);
 
 // --- TELEMETRY PUSH ENGINE (GRAPHITE TEXT INGESTION) ---
 
-const GRAPHITE_USER_ID = '3264995'; // 👈 Use the ID from your Graphite Data Source
-const API_TOKEN = process.env.GRAFANA_API_TOKEN;    // 👈 Your existing Access Policy Token (glc_...)
+const GRAPHITE_USER_ID = '3264995'; // 👈 Your Graphite Data Source Instance ID
+const API_TOKEN = process.env.GRAFANA_API_TOKEN; // 👈 Your glc_... Access Policy Token
 
 // Target the standard metrics API push endpoint for Graphite
 const PUSH_URL = `https://graphite-prod-43-prod-ap-south-1.grafana.net/graphite/metrics`;
 
+// Pre-compute basic authentication token safely
 const authHeader = 'Basic ' + Buffer.from(`${GRAPHITE_USER_ID}:${API_TOKEN}`).toString('base64');
 
 console.log('[Telemetry] Outbound Graphite text push engine initialized.');
 
 setInterval(async () => {
   try {
-    // 1. Extract the current metric value from your active connection gauge
-    const gaugeMetrics = await activeConnectionsGauge.get();
-    const activeConnections = gaugeMetrics.values[0]?.value ?? 0;
+    // 1. Fetch current active connection count
+    const connectionsData = await activeConnectionsGauge.get();
+    const activeConnections = connectionsData.values[0]?.value ?? 0;
+
+    // 2. Fetch total messages handled across all action labels
+    const messageData = await messageCounter.get();
+    const totalMessages = messageData.values.reduce((sum, v) => sum + v.value, 0);
     
-    // 2. Format the payload as standard Graphite plaintext line protocol
     const timestamp = Math.floor(Date.now() / 1000);
+
+    // 🟢 FIXED: Grafana Cloud's HTTP API demands JSON matching this explicit schema
     const payload = JSON.stringify([
-      {
-        name: "nexus_sync.active_connections",
-        value: activeConnections,
-        time: timestamp,
-        interval: 10
+      { 
+        name: "nexus_sync.active_connections", 
+        value: activeConnections, 
+        time: timestamp, 
+        interval: 10 
+      },
+      { 
+        name: "nexus_sync.total_messages", 
+        value: totalMessages, 
+        time: timestamp, 
+        interval: 10 
       }
     ]);
 
-    // 3. Post the plain text JSON payload out to Grafana
-    const response = await fetch(PUSH_URL, {
+    // 3. Send it off securely using the exact authHeader and application/json Content-Type
+    const res = await fetch(PUSH_URL, {
       method: 'POST',
       headers: {
         'Authorization': authHeader,
@@ -75,15 +87,16 @@ setInterval(async () => {
       body: payload,
     });
 
-    if (response.ok) {
-      console.log(`[Telemetry] Metrics pushed to Graphite! Status: ${response.status}`);
+    // 4. Trace the results in your server terminal
+    if (res.ok) {
+      console.log(`[Telemetry Sync]: 🚀 Metrics accepted by Grafana Cloud! (Conns: ${activeConnections}, Msgs: ${totalMessages})`);
     } else {
-      const errorText = await response.text();
-      console.error(`[Telemetry Failure] Graphite rejected metrics. Code: ${response.status} - ${errorText}`);
+      // Read the underlying error body to see exactly why it's complaining
+      const errorText = await res.text();
+      console.error(`[Telemetry Warning]: Grafana rejected payload. Status: ${res.status}, Reason: ${errorText}`);
     }
+
   } catch (error) {
-    console.error('[Telemetry Network Error]:', error);
+    console.error('[Telemetry Sync Failure]: Outbound engine exception:', error);
   }
-}, 10000); // Streams every 10 seconds
-
-
+}, 10000); // Ships data every 10 seconds

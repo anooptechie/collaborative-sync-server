@@ -110,7 +110,6 @@ wss.on('connection', (ws: ExtWebSocket, request: http.IncomingMessage) => {
         }
 
         currentRoomId = roomId;
-        // Use server-verified username here instead of client input fields
         roomManager.joinRoom(roomId, participantId, ws, username);
       } 
       
@@ -169,7 +168,7 @@ async function bootstrap() {
     await initRedis();
     await initDatabase(); // Boot and run migrations for Postgres table
     
-    // ⚡ FIX: Explicitly bind to '0.0.0.0' to open up local network routing interfaces
+    // ⚡ Explicitly bind to '0.0.0.0' to open up network routing interfaces
     server.listen(Number(PORT), '0.0.0.0', () => {
       logger.info(
         { component: 'Bootstrap', host: '0.0.0.0', port: PORT }, 
