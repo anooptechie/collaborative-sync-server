@@ -9,7 +9,8 @@
     "strict": true,
     "skipLibCheck": true,
     "sourceMap": true,
-    "outDir": "./dist"
+    "outDir": "./dist",
+    "noEmit": true
   },
   "include": ["**/*.ts"] 
 }
