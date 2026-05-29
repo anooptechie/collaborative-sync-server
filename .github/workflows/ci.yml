@@ -2,7 +2,7 @@ name: Collaborative Sync Server CI
 
 on:
   push:
-    branches: [ main, feature/* ]
+    branches: [ main, "feature/*" ]
   pull_request:
     branches: [ main ]
 
@@ -29,7 +29,7 @@ jobs:
       - name: Run Linting
         run: npm run lint
 
-      # 🚀 PERFORMANCE GATE: Spin up server in background
+      # 🚀 PERFORMANCE GATE: Spin up server with safe isolated test variables
       - name: Start Server in Background
         run: |
           npm run build
@@ -37,15 +37,21 @@ jobs:
         env:
           NODE_ENV: test
           PORT: 8080
-          # Pass any transient environment variables your server needs to boot cleanly
+          DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/test_db"
+          REDIS_URL: "redis://localhost:6379"
 
-      # Wait for the network port to open before kicking off the load test
+      # 🔍 NETWORKING GATE: Wait up to 30s for raw TCP socket binding (prevents HTTP route hanging)
       - name: Wait for Server Response
-        run: npx wait-on http://127.0.0.1:8080 || sleep 3
+        run: npx wait-on tcp:127.0.0.1:8080 --timeout 30000
 
-      # Pull down official k6 runner and run the regression headless script
+      # 📊 PERFORMANCE REGRESSION GATE: Execute headless k6 test run
       - name: Run k6 Load Test Gate
         uses: grafana/k6-action@v0.3.1
         with:
           filename: load-test.js
           flags: --quiet
+
+      # 🐳 CONTAINER VERIFICATION GATE: Validate clean compilation and deployment portability
+      - name: Verify Container Build Matrix
+        run: |
+          docker build -t collaborative-sync-server:test .
