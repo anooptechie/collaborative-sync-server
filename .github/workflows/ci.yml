@@ -62,3 +62,8 @@ jobs:
         with:
           filename: load-test.js
           flags: --quiet
+
+      # 🐳 CONTAINER VERIFICATION GATE: Validate clean compilation and build portability
+      - name: Verify Container Build Matrix
+        run: |
+          docker build -t collaborative-sync-server:test .
