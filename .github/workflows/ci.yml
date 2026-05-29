@@ -41,11 +41,15 @@ jobs:
       - name: Run Linting
         run: npm run lint
 
-      # 🚀 PERFORMANCE GATE: Spin up server and pipe stdout/stderr to an artifact log file
+      # 🚀 PERFORMANCE GATE: Spin up server pointing to the nested dist output location
       - name: Start Server in Background
         run: |
           npm run build
-          node dist/server.js > server.log 2>&1 &
+          if [ -f "dist/src/server.js" ]; then
+            node dist/src/server.js > server.log 2>&1 &
+          else
+            node dist/server.js > server.log 2>&1 &
+          fi
         env:
           NODE_ENV: test
           PORT: 8080
