@@ -1,4 +1,3 @@
-/* global console */
 import ws from 'k6/ws';
 
 export const options = {
