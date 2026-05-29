@@ -1,0 +1,41 @@
+
+services:
+  sync-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sync-server-instance
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=test
+      - PORT=8080
+      - DATABASE_URL=postgresql://postgres:postgres@app-postgres:5432/test_db
+      - REDIS_URL=redis://app-redis:6379
+    depends_on:
+      - app-redis
+      - app-postgres
+    networks:
+      - sync-network
+
+  app-redis:
+    image: redis:7-alpine
+    container_name: app-redis
+    networks:
+      - sync-network
+
+  app-postgres:
+    image: postgres:15-alpine
+    container_name: app-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=test_db
+    ports:
+      - "5432:5432"
+    networks:
+      - sync-network
+
+networks:
+  sync-network:
+    driver: bridge
