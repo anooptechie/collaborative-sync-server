@@ -1,11 +1,12 @@
 import pino from 'pino';
 
-const isProduction = process.env.NODE_ENV === 'production';
+// Explicitly check for local development mode
+const isDevelopment = process.env.NODE_ENV === 'development';
 
 export const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
-  // In production, log raw JSON. Locally, route through pino-pretty for clean reading.
-  transport: !isProduction
+  // ONLY run pino-pretty if we are explicitly running locally in development mode
+  transport: isDevelopment
     ? {
         target: 'pino-pretty',
         options: {
@@ -14,5 +15,5 @@ export const logger = pino({
           translateTime: 'SYS:yyyy-mm-dd HH:MM:ss.l',
         },
       }
-    : undefined,
+    : undefined, // Falls back to standard, ultra-fast JSON lines for production, staging, and test environments
 });
