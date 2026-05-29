@@ -41,20 +41,21 @@ jobs:
       - name: Run Linting
         run: npm run lint
 
-      # 🚀 PERFORMANCE GATE: Spin up server pointing to the native runner services
+      # 🚀 PERFORMANCE GATE: Spin up server and pipe stdout/stderr to an artifact log file
       - name: Start Server in Background
         run: |
           npm run build
-          node dist/server.js &
+          node dist/server.js > server.log 2>&1 &
         env:
           NODE_ENV: test
           PORT: 8080
           DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/test_db"
-          REDIS_URL: "redis://localhost:6379" # Connects directly to the service container above
+          REDIS_URL: "redis://localhost:6379"
 
-      # 🔍 NETWORKING GATE: Wait up to 30s for raw TCP socket binding
+      # 🔍 NETWORKING GATE: Wait up to 30s for raw TCP socket binding, extract logs immediately on failure
       - name: Wait for Server Response
-        run: npx wait-on tcp:127.0.0.1:8080 --timeout 30000
+        run: |
+          npx wait-on tcp:127.0.0.1:8080 --timeout 30000 || (echo "=== SERVER CRASH LOGS ===" && cat server.log && exit 1)
 
       # 📊 PERFORMANCE REGRESSION GATE: Execute headless k6 test run
       - name: Run k6 Load Test Gate
@@ -62,8 +63,3 @@ jobs:
         with:
           filename: load-test.js
           flags: --quiet
-
-      # 🐳 CONTAINER VERIFICATION GATE (Add this block back when your Dockerfile is ready)
-      # - name: Verify Container Build Matrix
-      #   run: |
-      #     docker build -t collaborative-sync-server:test .
