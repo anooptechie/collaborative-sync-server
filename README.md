@@ -54,6 +54,21 @@ A real-time, high-performance state synchronization server built to handle low-l
 
 ---
 
+## 🔄 Continuous Integration & Automated Quality Gates
+
+The repository enforces a rigorous code integration pipeline using GitHub Actions to guarantee structural stability, system bootstrapping validity, and performance regression defense on every commit or pull request.
+
+
+The pipeline automated lifecycle executes across the following quality stages:
+
+1. **Deterministic Dependency Resolution:** Runs `npm ci` against your committed `package-lock.json` to eliminate micro-package version drift across builds.
+2. **Static Compilation & Style Analysis:** Runs explicit type validation checks (`tsc --noEmit`) to verify strict data flow interface contracts, alongside styling enforcement policies (`npm run lint`).
+3. **Isolated Test Harness Infrastructure:** Provisions a localized, native runner service container running `redis:7-alpine`. The server initializes on the fly using `npx tsx` and connects securely to this local backplane using mock connections, completely isolating live cloud clusters (Neon / Upstash) from testing contamination.
+4. **Transport-Layer Network Gate:** Uses an asynchronous `wait-on tcp:` network handler to explicitly pause the execution track until the server successfully opens its sockets and binds to port `8080`, instantly failing if an unhandled boot crash takes place.
+5. **Headless Regression Stress Testing:** Automatically deploys a Grafana k6 runner container against the newly booted background server, executing real-time high-concurrency client mutations to measure socket latency limits and drop rates before any code can be merged.
+
+---
+
 ## 🗄️ Database Schema Design
 
 The cold storage tier leverages PostgreSQL's binary JSON capabilities (`JSONB`) to blend relational structural integrity with unstructured snapshot flexibility, avoiding complex object-relational mapping overhead.

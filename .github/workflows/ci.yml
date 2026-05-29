@@ -1,37 +1,64 @@
-name: Collaborative Sync Server CI 
+name: Collaborative Sync Server CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, "feature/*" ]
   pull_request:
     branches: [ main ]
 
 jobs:
-  verify-build:
-    name: Type Check and Lint
+  validate-and-test:
     runs-on: ubuntu-latest
 
+    # 🔗 Spin up a real, isolated Redis container for the pipeline duration
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
-      # 1. Pull down the source code
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Set up the exact Node.js runtime matching our stack
-      - name: Setup Node.js Runtime
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
-          cache: 'npm' # Automatically caches node_modules boundaries for rapid execution
+          node-version: 22
+          cache: 'npm'
 
-      # 3. Clean install deterministic dependencies
       - name: Install Dependencies
         run: npm ci
 
-      # 4. Enforce code style and defensive structures
-      - name: Run Linter
-        run: npm run lint
-        continue-on-error: false
-
-      # 5. Native TypeScript validation (Catching implicit anys and type mismatches)
-      - name: Run TypeScript Compiler (Type Check)
+      - name: Run Type Check
         run: npx tsc --noEmit
+
+      - name: Run Linting
+        run: npm run lint
+
+      # 🚀 PERFORMANCE GATE: Execute server.ts directly using tsx runtime execution
+      - name: Start Server in Background
+        run: |
+          npx tsx server.ts > server.log 2>&1 &
+        env:
+          NODE_ENV: test
+          PORT: 8080
+          DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/test_db"
+          REDIS_URL: "redis://localhost:6379"
+
+      # 🔍 NETWORKING GATE: Wait up to 30s for raw TCP socket binding, extract logs immediately on failure
+      - name: Wait for Server Response
+        run: |
+          npx wait-on tcp:127.0.0.1:8080 --timeout 30000 || (echo "=== SERVER CRASH LOGS ===" && cat server.log && exit 1)
+
+      # 📊 PERFORMANCE REGRESSION GATE: Execute headless k6 test run
+      - name: Run k6 Load Test Gate
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: load-test.js
+          flags: --quiet
