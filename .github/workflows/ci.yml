@@ -1,37 +1,51 @@
-name: Collaborative Sync Server CI 
+name: Collaborative Sync Server CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, feature/* ]
   pull_request:
     branches: [ main ]
 
 jobs:
-  verify-build:
-    name: Type Check and Lint
+  validate-and-test:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Pull down the source code
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Set up the exact Node.js runtime matching our stack
-      - name: Setup Node.js Runtime
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
-          cache: 'npm' # Automatically caches node_modules boundaries for rapid execution
+          node-version: 22
+          cache: 'npm'
 
-      # 3. Clean install deterministic dependencies
       - name: Install Dependencies
         run: npm ci
 
-      # 4. Enforce code style and defensive structures
-      - name: Run Linter
-        run: npm run lint
-        continue-on-error: false
-
-      # 5. Native TypeScript validation (Catching implicit anys and type mismatches)
-      - name: Run TypeScript Compiler (Type Check)
+      - name: Run Type Check
         run: npx tsc --noEmit
+
+      - name: Run Linting
+        run: npm run lint
+
+      # 🚀 PERFORMANCE GATE: Spin up server in background
+      - name: Start Server in Background
+        run: |
+          npm run build
+          node dist/server.js &
+        env:
+          NODE_ENV: test
+          PORT: 8080
+          # Pass any transient environment variables your server needs to boot cleanly
+
+      # Wait for the network port to open before kicking off the load test
+      - name: Wait for Server Response
+        run: npx wait-on http://127.0.0.1:8080 || sleep 3
+
+      # Pull down official k6 runner and run the regression headless script
+      - name: Run k6 Load Test Gate
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: load-test.js
+          flags: --quiet
