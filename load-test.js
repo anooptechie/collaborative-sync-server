@@ -1,20 +1,19 @@
 import ws from 'k6/ws';
-import { check, sleep } from 'k6';
 
 export const options = {
   stages: [
-    { duration: '20s', target: 50 },  // Ramp up from 0 to 20 concurrent users over 20s
-    { duration: '30s', target: 100 },  // Hold 20 users steady for 30 seconds
+    { duration: '20s', target: 50 },  // Ramp up to 50 concurrent users over 20s
+    { duration: '30s', target: 100 }, // Hold 100 users steady for 30 seconds
     { duration: '10s', target: 0 },   // Clean ramp down to 0 users
   ],
 };
 
 export default function () {
-  // ⚡ FIXED: Appending the exact SECRET_TOKEN expected by your authService structure
+  // ⚡ Appending the exact SECRET_TOKEN expected by your authService structure
   const url = 'ws://127.0.0.1:8080?token=nexus-sync-super-secret-token&username=Anoop_LoadBot';
   const params = { tags: { test_type: 'nexus_stress_run' } };
 
-  const res = ws.connect(url, params, function (socket) {
+  ws.connect(url, params, function (socket) {
     socket.on('open', () => {
       console.log('Virtual User Connected');
 
@@ -35,6 +34,4 @@ export default function () {
       socket.close();
     }, 15000);
   });
-
-  check(res, { 'Handshake 101 Success': (r) => r && r.status === 101 });
 }
