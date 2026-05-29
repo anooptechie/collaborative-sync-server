@@ -69,6 +69,64 @@ The pipeline automated lifecycle executes across the following quality stages:
 
 ---
 
+## 🐳 Containerization & Local Orchestration
+
+The application utilizes a secure, production-hardened **multi-stage Docker architecture** to compile TypeScript and prune development dependencies. This ensures that the final runtime footprint is minimal, immutable, and running natively on top of a lightweight Alpine Linux base layer.
+
+### 🏗️ Multi-Stage Build Pipeline
+
+1. **Build Stage (`builder`):** Pulls the complete Node image, installs all dependencies (`npm ci`), copies the TypeScript source configuration, and prepares the workspace.
+2. **Prune Stage:** Runs `npm prune --production` to completely strip out compiler utilities, type definitions (`@types/*`), and testing frameworks.
+3. **Runtime Stage (`runner`):** Copies *only* the compiled production artifacts and the strict dependencies into a clean `node:22-alpine` environment, minimizing the attack surface.
+
+---
+
+### ⚙️ Automated Cluster Orchestration (Docker Compose)
+
+To test the full distributed system topology locally without manually setting up network bridges or managing host database installations, use Docker Compose. This spins up the sync server alongside isolated instance dependencies.
+
+#### Architecture Topology
+* **`sync-server`**: The core application container executing on port `8080`.
+* **`app-redis`**: Native Redis instance handling scaling channels and distributed cache management.
+* **`app-postgres`**: Relational persistence engine handling schema operations and baseline table checks.
+
+---
+
+### 🚀 Getting Started
+
+Ensure you have Docker and Docker Compose installed on your host system (pre-configured if using GitHub Codespaces).
+
+#### 1. Boot the Entire Infrastructure Matrix
+Run the following command from the root directory to build the multi-stage image and spin up the network cluster in detached mode:
+
+docker compose up -d --build
+
+2. Monitor Live Unified Logs
+To watch live, real-time log traces streaming concurrently across your application server and backing databases:
+
+docker compose logs -f
+
+3. Tear Down the Environment
+When you are finished testing, gracefully stop the servers and tear down the isolated virtual bridge network cleanly by running:
+
+docker compose down
+
+Useful Operations & Troubleshooting
+Force a Rebuild After Code Changes:
+If you modify your TypeScript source code files, instruct Compose to break the cache and recompile:
+
+docker compose up -d --build
+
+Verify System Status:
+
+docker ps
+
+Inspect an Individual Container's Stream:
+
+docker logs sync-server-instance
+
+---
+
 ## 🗄️ Database Schema Design
 
 The cold storage tier leverages PostgreSQL's binary JSON capabilities (`JSONB`) to blend relational structural integrity with unstructured snapshot flexibility, avoiding complex object-relational mapping overhead.
