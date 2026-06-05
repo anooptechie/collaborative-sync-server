@@ -1,4 +1,5 @@
 import client from 'prom-client';
+import { logger } from './logger.js';
 
 // Create a Registry to register the metrics
 export const register = new client.Registry();
@@ -38,16 +39,14 @@ register.registerMetric(activeRoomsGauge);
 
 // --- TELEMETRY PUSH ENGINE (GRAPHITE TEXT INGESTION) ---
 
-const GRAPHITE_USER_ID = '3264995'; // 👈 Your Graphite Data Source Instance ID
-const API_TOKEN = process.env.GRAFANA_API_TOKEN; // 👈 Your glc_... Access Policy Token
+const GRAPHITE_USER_ID = process.env.GRAPHITE_USER_ID_ENV;
+const API_TOKEN = process.env.GRAFANA_API_TOKEN;
 
-// Target the standard metrics API push endpoint for Graphite
 const PUSH_URL = `https://graphite-prod-43-prod-ap-south-1.grafana.net/graphite/metrics`;
 
-// Pre-compute basic authentication token safely
 const authHeader = 'Basic ' + Buffer.from(`${GRAPHITE_USER_ID}:${API_TOKEN}`).toString('base64');
 
-console.log('[Telemetry] Outbound Graphite text push engine initialized.');
+logger.info({ component: 'TelemetryEngine' }, 'Outbound Graphite text push engine initialized.');
 
 setInterval(async () => {
   try {
@@ -58,26 +57,24 @@ setInterval(async () => {
     // 2. Fetch total messages handled across all action labels
     const messageData = await messageCounter.get();
     const totalMessages = messageData.values.reduce((sum, v) => sum + v.value, 0);
-    
+
     const timestamp = Math.floor(Date.now() / 1000);
 
-    // 🟢 FIXED: Grafana Cloud's HTTP API demands JSON matching this explicit schema
     const payload = JSON.stringify([
-      { 
-        name: "nexus_sync.active_connections", 
-        value: activeConnections, 
-        time: timestamp, 
-        interval: 10 
+      {
+        name: "nexus_sync.active_connections",
+        value: activeConnections,
+        time: timestamp,
+        interval: 10
       },
-      { 
-        name: "nexus_sync.total_messages", 
-        value: totalMessages, 
-        time: timestamp, 
-        interval: 10 
+      {
+        name: "nexus_sync.total_messages",
+        value: totalMessages,
+        time: timestamp,
+        interval: 10
       }
     ]);
 
-    // 3. Send it off securely using the exact authHeader and application/json Content-Type
     const res = await fetch(PUSH_URL, {
       method: 'POST',
       headers: {
@@ -87,16 +84,23 @@ setInterval(async () => {
       body: payload,
     });
 
-    // 4. Trace the results in your server terminal
     if (res.ok) {
-      console.log(`[Telemetry Sync]: 🚀 Metrics accepted by Grafana Cloud! (Conns: ${activeConnections}, Msgs: ${totalMessages})`);
+      logger.info(
+        { component: 'TelemetryEngine', activeConnections, totalMessages },
+        'Metrics accepted by Grafana Cloud'
+      );
     } else {
-      // Read the underlying error body to see exactly why it's complaining
       const errorText = await res.text();
-      console.error(`[Telemetry Warning]: Grafana rejected payload. Status: ${res.status}, Reason: ${errorText}`);
+      logger.warn(
+        { component: 'TelemetryEngine', status: res.status, reason: errorText },
+        'Grafana rejected telemetry payload'
+      );
     }
 
   } catch (error) {
-    console.error('[Telemetry Sync Failure]: Outbound engine exception:', error);
+    logger.error(
+      { component: 'TelemetryEngine', error },
+      'Outbound telemetry push engine exception'
+    );
   }
-}, 10000); // Ships data every 10 seconds
+}, 10000);
