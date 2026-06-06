@@ -43,7 +43,7 @@ export default function () {
           'response has valid event field': (m) => m.event !== undefined,
           'response is not an error event': (m) => m.event !== 'error',
         });
-      } catch (_err) {
+      } catch {
         check(null, { 'response is valid JSON': () => false });
       }
     });

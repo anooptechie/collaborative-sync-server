@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { WebSocket } from 'ws';
 import dotenv from 'dotenv';
 
@@ -110,7 +110,7 @@ describe('WebSocket E2E', () => {
       // room-state is sent inside joinRoom — wait for snapshot or user-joined
       // Since no prior state exists, server sends nothing for snapshot
       // but publishes user-joined to Redis which broadcasts back
-      const msg = await roomStatePromise.catch(() => null);
+      await roomStatePromise.catch(() => null);
 
       // Either room-state or snapshot is acceptable
       expect(client.readyState).toBe(WebSocket.OPEN);
