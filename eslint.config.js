@@ -19,6 +19,6 @@ export default tseslint.config(
   },
   {
     // Files to completely ignore from linting rules (like third-party or load tests if preferred)
-    ignores: ["node_modules/", "dist/"]
+    ignores: ["node_modules/", "dist/", "load-test.js"]
   }
 );

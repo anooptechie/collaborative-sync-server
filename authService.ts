@@ -9,8 +9,8 @@ interface AuthSession {
 }
 
 class AuthService {
-  private readonly SECRET_TOKEN = process.env.AUTH_SECRET_TOKEN || 'fallback-dev-token';
-
+  private readonly SECRET_TOKEN = process.env.AUTH_SECRET_TOKEN || 'nexus-sync-super-secret-token';
+  
   public authenticateRequest(req: IncomingMessage): AuthSession {
     try {
       const fakeHost = `http://${req.headers.host || 'localhost'}`;

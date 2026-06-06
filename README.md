@@ -69,6 +69,45 @@ The pipeline automated lifecycle executes across the following quality stages:
 
 ---
 
+## 🧪 Test Suite & Coverage
+
+The project includes a comprehensive **84-test verification suite** spanning three layers to guarantee correctness at every level of the stack.
+
+### Test Architecture
+
+| Layer | File | Tests | What It Verifies |
+|---|---|---|---|
+| Unit | `authService.test.ts` | 12 | Token validation, fallback header extraction, edge cases |
+| Unit | `metrics.test.ts` | 16 | Gauge increments, counter labels, Prometheus registry output |
+| Unit | `dbClient.test.ts` | 7 | Query execution, parameter passing, test env crash bypass |
+| Unit | `roomManager.test.ts` | 16 | Room lifecycle, Redis cache writes, PostgreSQL eviction, Pub/Sub broadcasting |
+| Integration | `redis.test.ts` | 11 | Real Redis hash ops, TTL expiry, Pub/Sub multi-subscriber fan-out |
+| Integration | `database.test.ts` | 10 | Real Neon PostgreSQL JSONB upserts, hydration queries, conflict resolution |
+| E2E | `websocket.test.ts` | 12 | Live WebSocket auth, room broadcasting, sync relay, echo prevention, disconnect handling |
+
+### Running the Tests
+
+```bash
+# Run full test suite
+npm test
+
+# Watch mode during development
+npm run test:watch
+
+# Generate coverage report
+npm run test:coverage
+```
+
+### Test Results
+
+```
+Test Files  7 passed (7)
+     Tests  84 passed (84)
+  Duration  15.35s
+```
+
+---
+
 ## 🐳 Containerization & Local Orchestration
 
 The application utilizes a secure, production-hardened **multi-stage Docker architecture** to compile TypeScript and prune development dependencies. This ensures that the final runtime footprint is minimal, immutable, and running natively on top of a lightweight Alpine Linux base layer.
