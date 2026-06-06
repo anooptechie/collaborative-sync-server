@@ -10,7 +10,6 @@ jobs:
   validate-and-test:
     runs-on: ubuntu-latest
 
-    # 🔗 Spin up a real, isolated Redis container for the pipeline duration
     services:
       redis:
         image: redis:7-alpine
@@ -41,29 +40,46 @@ jobs:
       - name: Run Linting
         run: npm run lint
 
-      # 🚀 PERFORMANCE GATE: Execute server.ts directly using tsx runtime execution
+      # 🧪 RUN FULL TEST SUITE
+      - name: Run Test Suite
+        run: npm test
+        env:
+          NODE_ENV: test
+          REDIS_URL: "redis://localhost:6379"
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AUTH_SECRET_TOKEN: ${{ secrets.AUTH_SECRET_TOKEN }}
+          GRAFANA_API_TOKEN: ${{ secrets.GRAFANA_API_TOKEN }}
+          GRAPHITE_USER_ID_ENV: ${{ secrets.GRAPHITE_USER_ID_ENV }}
+
+      # 🚀 START SERVER FOR PERFORMANCE GATE
       - name: Start Server in Background
         run: |
           npx tsx server.ts > server.log 2>&1 &
         env:
           NODE_ENV: test
           PORT: 8080
-          DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/test_db"
           REDIS_URL: "redis://localhost:6379"
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AUTH_SECRET_TOKEN: ${{ secrets.AUTH_SECRET_TOKEN }}
+          GRAFANA_API_TOKEN: ${{ secrets.GRAFANA_API_TOKEN }}
+          GRAPHITE_USER_ID_ENV: ${{ secrets.GRAPHITE_USER_ID_ENV }}
 
-      # 🔍 NETWORKING GATE: Wait up to 30s for raw TCP socket binding, extract logs immediately on failure
+      # 🔍 NETWORKING GATE
       - name: Wait for Server Response
         run: |
           npx wait-on tcp:127.0.0.1:8080 --timeout 30000 || (echo "=== SERVER CRASH LOGS ===" && cat server.log && exit 1)
 
-      # 📊 PERFORMANCE REGRESSION GATE: Execute headless k6 test run
+      # 📊 PERFORMANCE REGRESSION GATE
       - name: Run k6 Load Test Gate
         uses: grafana/k6-action@v0.3.1
         with:
           filename: load-test.js
           flags: --quiet
+        env:
+          K6_WS_URL: ws://host.docker.internal:8080
+          AUTH_SECRET_TOKEN: ${{ secrets.AUTH_SECRET_TOKEN }}
 
-      # 🐳 CONTAINER VERIFICATION GATE: Validate clean compilation and build portability
+      # 🐳 CONTAINER VERIFICATION GATE
       - name: Verify Container Build Matrix
         run: |
           docker build -t collaborative-sync-server:test .
