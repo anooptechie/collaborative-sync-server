@@ -69,6 +69,11 @@ jobs:
         run: |
           npx wait-on tcp:127.0.0.1:8080 --timeout 30000 || (echo "=== SERVER CRASH LOGS ===" && cat server.log && exit 1)
 
+      # 🩺 VERIFY SERVER STILL ALIVE BEFORE k6
+      - name: Verify Server Still Running
+        run: |
+          curl -f http://127.0.0.1:8080 || (echo "=== SERVER DIED BEFORE k6 ===" && cat server.log && exit 1)
+
       # 📊 INSTALL k6 NATIVELY
       - name: Install k6
         run: |
@@ -84,6 +89,11 @@ jobs:
         env:
           K6_WS_URL: ws://127.0.0.1:8080
           AUTH_SECRET_TOKEN: ${{ secrets.AUTH_SECRET_TOKEN }}
+
+      # 📋 PRINT SERVER LOGS (always runs — even on failure)
+      - name: Print Server Logs
+        if: always()
+        run: cat server.log
 
       # 🐳 CONTAINER VERIFICATION GATE
       - name: Verify Container Build Matrix
