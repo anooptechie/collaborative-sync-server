@@ -90,7 +90,7 @@ jobs:
           K6_WS_URL: ws://127.0.0.1:8080
           AUTH_SECRET_TOKEN: ${{ secrets.AUTH_SECRET_TOKEN }}
 
-      # 📋 PRINT SERVER LOGS (always runs — even on failure)
+      # 📋 PRINT SERVER LOGS (always runs)
       - name: Print Server Logs
         if: always()
         run: cat server.log
