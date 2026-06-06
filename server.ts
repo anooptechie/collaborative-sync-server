@@ -110,7 +110,9 @@ wss.on('connection', (ws: ExtWebSocket, request: http.IncomingMessage) => {
         }
 
         currentRoomId = roomId;
-        roomManager.joinRoom(roomId, participantId, ws, username);
+        roomManager.joinRoom(roomId, participantId, ws, username).catch((error) => {
+          logger.error({ component: 'Pipeline', participantId, error }, 'Failed to join room');
+        });
       } 
       
       else if (data.action === 'sync') {
